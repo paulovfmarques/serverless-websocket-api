@@ -1,7 +1,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { clientsTable, dynamodbClient } from "../dynamoDB";
 import { getQueryParam } from "../utils/getQueryParams";
-import { PutItemCommand, ScanCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
+import { PutItemCommand, ScanCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
 
 const responseOK = {
     statusCode: 200,
@@ -29,8 +29,9 @@ export const handler = async (event: APIGatewayProxyEvent, context: any): Promis
             clientsTableData.Items?.find((item) => item.deviceId.S === deviceId) || false;
 
         if (matchingClient) {
+            // If the client already exists, delete it first
             await dynamodbClient.send(
-                new UpdateItemCommand({
+                new DeleteItemCommand({
                     TableName: clientsTable,
                     Key: {
                         deviceId: {
@@ -40,11 +41,26 @@ export const handler = async (event: APIGatewayProxyEvent, context: any): Promis
                             S: matchingClient.connectionId.S as string,
                         },
                     },
-                    UpdateExpression: 'SET connectionId = :newConnectionId',
-                    ExpressionAttributeValues: {
-                        ':newConnectionId': { S: connectionId },
+                }),
+            );
+
+            await dynamodbClient.send(
+                new PutItemCommand({
+                    TableName: clientsTable,
+                    Item: {
+                        deviceId: {
+                            S: deviceId,
+                        },
+                        clientType: {
+                            S: clientType,
+                        },
+                        connectionId: {
+                            S: connectionId,
+                        },
+                        expiresAt: {
+                            N: (Math.floor(Date.now() / 1000) + 60 * 60).toString(),
+                        },
                     },
-                    ReturnValues: 'ALL_NEW',
                 }),
             );
         } else {
